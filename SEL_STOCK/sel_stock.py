@@ -6,7 +6,7 @@ score_universe.py
 - 총점 상위 5개 종목 출력 + 상세 점수 브레이크다운
 
 필요 패키지:
-  pip install finance-datareader pykrx pandas numpy
+  
 """
 
 import warnings
@@ -21,19 +21,23 @@ import pandas as pd
 import FinanceDataReader as fdr
 from pykrx import stock as krx
 
+from tqdm import tqdm
+from pathlib import Path
+import os
+
 
 # ===================== 설정 =====================
 TOP_N_MARCAP = 100          # 시총 상위 N
-PICK_TOP = 5                # 최종 선별 수
+PICK_TOP = 10                # 최종 선별 수
 INDEX_TICKER = "KS11"       # KOSPI 지수 (FinanceDataReader)
-LOOKBACK_DAYS = 400         # 지표 계산기간(영업일 여유 포함)
+LOOKBACK_DAYS = 200         # 지표 계산기간(영업일 여유 포함)
 
 # 점수 테이블(요청안)
 WEIGHTS = {
     # --- 기술적 ---
-    "rsi30": 10,                # (1) RSI < 30
-    "momentum_pos": 10,         # (2) MOM>0
-    "macd_cross": 10,           # (3) MACD 골든크로스
+    "rsi30": 10,                # (1) RSI < 30 RSI(Relative Strength Index): 가격 상승/하락 압력의 상대적 강도를 0–100 범위로 나타내는 모멘텀 오실레이터.
+    "momentum_pos": 10,         # (2) MOM>0: 일정 기간 전 가격과 현재 가격의 차이를 통해 가격 상승/하락의 힘을 수치화한 것. Momentum > 0 → 현재 가격이 과거보다 높음 → 상승 압력
+    "macd_cross": 10,           # (3) MACD 골든크로스: MACD (Moving Average Convergence Divergence)MACD선이 Signal선을 아래에서 위로 돌파하는 순간 단기 추세가 장기 추세보다 강해지기 시작했다는 의미
     "ema5_over_ema20": 5,       # (4) 5일선이 20일선 돌파
     "ema20_over_ema60": 10,     # (5) 20일선이 60일선 돌파
     "rs_plus": 10,              # (6) 20일 상대강도(종목-KOSPI) +
@@ -69,12 +73,20 @@ def add_indicators(px: pd.DataFrame) -> pd.DataFrame:
         if need not in out.columns:
             raise ValueError(f"'{need}' column missing in price DataFrame")
 
-    # RSI(14)
+    # # RSI(14)
+    # delta = out["Close"].diff()
+    # up = delta.clip(lower=0.0).rolling(14).mean()
+    # down = (-delta.clip(upper=0.0)).rolling(14).mean()
+    # rs = up / (down + 1e-12)
+    # out["RSI"] = 100 - (100 / (1 + rs))
+
+    # RSI(7)
     delta = out["Close"].diff()
-    up = delta.clip(lower=0.0).rolling(14).mean()
-    down = (-delta.clip(upper=0.0)).rolling(14).mean()
+    up = delta.clip(lower=0.0).rolling(7).mean()
+    down = (-delta.clip(upper=0.0)).rolling(7).mean()
     rs = up / (down + 1e-12)
-    out["RSI14"] = 100 - (100 / (1 + rs))
+    out["RSI"] = 100 - (100 / (1 + rs))
+
 
     # Momentum(10)
     out["MOM10"] = out["Close"] - out["Close"].shift(10)
@@ -208,7 +220,7 @@ def score_one(
 
     # (1) RSI < 30
     try:
-        if px.loc[last, "RSI14"] < 30:
+        if px.loc[last, "RSI"] < 30:
             bd.rsi30 = WEIGHTS["rsi30"]
     except Exception:
         pass
@@ -321,11 +333,11 @@ def main():
 
     print(f"[기간] {s_fdr} ~ {e_fdr}")
 
-    # 1) KOSPI 시총 상위 100 종목
-    kospi = fdr.StockListing("KOSPI")
-    kospi = kospi.dropna(subset=["Marcap"]).sort_values("Marcap", ascending=False)
-    uni = kospi.head(TOP_N_MARCAP).copy()
-    print(f"[유니버스] {len(uni)} 종목")
+    # # 1) KOSPI 시총 상위 100 종목
+    # kospi = fdr.StockListing("KOSPI")
+    # kospi = kospi.dropna(subset=["Marcap"]).sort_values("Marcap", ascending=False)
+    # uni = kospi.head(TOP_N_MARCAP).copy()
+    # print(f"[유니버스] {len(uni)} 종목")
 
     # 2) KOSPI 지수 (상대강도용)
     idx_df = fdr.DataReader(INDEX_TICKER, s_fdr, e_fdr)
@@ -343,16 +355,17 @@ def main():
     tickers = krx.get_index_portfolio_deposit_file("1028")
 
     # 종목명 붙이기
+    uni = pd.DataFrame({"Code": tickers})
     df = pd.DataFrame({"Code": tickers})
     uni = uni[uni["Code"].isin(tickers)].copy()
-    uni["Marcap"] = uni["Marcap"].astype(float)
+    uni["Marcap"] = np.nan
     uni["Name"] = np.nan
     
     uni["Name"] = df["Code"].apply(krx.get_market_ticker_name)
     
     rows: List[Dict] = []
 
-    for _, r in uni.iterrows():
+    for _, r in tqdm(uni.iterrows()):
         ticker = r["Code"]          # 예: '005930' 형태
         name   = r.get("Name", "")
 
@@ -406,9 +419,9 @@ def main():
             )
 
             rows.append({
-                "Ticker": ticker,
                 "Name": name,
-                "Marcap": r["Marcap"],
+                "Code": ticker,
+                #"Marcap": r["Marcap"],
                 "Score": total,
                 **bd.__dict__
             })
@@ -423,16 +436,22 @@ def main():
         out = pd.DataFrame(rows).sort_values(["Score", "Marcap"], ascending=[False, False])
 
     # 출력
-    print("\n=== 총점 상위 5개 종목 ===")
-    print(out.head(PICK_TOP)[["Ticker", "Name", "Marcap", "Score"]])
+    print("\n=== 총점 상위 종목 ===")
+    print(out.head(PICK_TOP)[["Name", "Code", "Score"]])
 
-    print("\n=== 점수 브레이크다운 (상위 5개) ===")
-    cols = ["Ticker","Name","Score"] + list(WEIGHTS.keys())
+    print("\n=== 점수 브레이크다운 (상위 ) ===")
+    cols = ["Name","Code","Score"] + list(WEIGHTS.keys())
     print(out.head(PICK_TOP)[cols])
 
     # 저장 (선택)
-    out.to_csv("universe_scored.csv", index=False, encoding="utf-8-sig")
-    print("\n[저장] universe_scored.csv")
+    get_dir = Path("./_sel_out")
+    get_dir.mkdir(exist_ok=True, parents=True)
+    filepath = os.path.join(get_dir, f"scored_{e_krx}.csv")
+    out.to_csv(filepath, index=True)
+    print(f"[저장] {filepath}")
+
 
 if __name__ == "__main__":
     main()
+
+
