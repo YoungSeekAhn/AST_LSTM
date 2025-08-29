@@ -390,7 +390,7 @@ def main():
             px = add_indicators(px)  # 기존 함수 재사용
 
             # 5) 투자자 수급 (이미 KRX 기반이면 그대로, 아니면 pykrx 예시 참고)
-            #    예시) 개인/외국인/기관 순매수:
+
             # inv = stock.get_market_trading_value_by_date(s_krx, e_krx, ticker, detail=True)
             inv = fetch_investor_netbuy_df(ticker, s_krx, e_krx)
 
@@ -433,7 +433,7 @@ def main():
     if not rows:
         print("※ 결과 없음: 네트워크/거래일/pykrx 반환 형식 등을 확인하세요.")
     else:
-        out = pd.DataFrame(rows).sort_values(["Score", "Marcap"], ascending=[False, False])
+        out = pd.DataFrame(rows).sort_values(["Score"], ascending=[False, False])
 
     # 출력
     print("\n=== 총점 상위 종목 ===")
