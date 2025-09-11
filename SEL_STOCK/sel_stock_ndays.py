@@ -1,12 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 score_universe.py
-- KOSPI 시총 상위 100개 종목을 대상으로 조건별 점수 산정
+- KOSPI200 종목을 대상으로 조건별 점수 산정
 - 기술적(6), 거래량(2), 수급(5) = 총 13개 항목 → 최대 100점
-- 총점 상위 5개 종목 출력 + 상세 점수 브레이크다운
-
-필요 패키지:
-  
+- 최근 영업일 5일 점수 합산(Score_1w) 기준 상위 종목 출력/저장
 """
 
 import warnings
@@ -24,20 +21,21 @@ from pykrx import stock as krx
 from tqdm import tqdm
 from pathlib import Path
 import os
-
+from pandas.tseries.offsets import BDay
 
 # ===================== 설정 =====================
-TOP_N_MARCAP = 100          # 시총 상위 N
+TOP_N_MARCAP = 100           # 시총 상위 N (현재는 KOSPI200로 대체)
 PICK_TOP = 10                # 최종 선별 수
-INDEX_TICKER = "KS11"       # KOSPI 지수 (FinanceDataReader)
-LOOKBACK_DAYS = 200         # 지표 계산기간(영업일 여유 포함)
+INDEX_TICKER = "KS11"        # KOSPI 지수 (FinanceDataReader)
+LOOKBACK_DAYS = 200          # 지표 계산기간(영업일 여유 포함)
+WEEK_BDAYS = 5               # '직전 1주' = 최근 5 영업일
 
 # 점수 테이블(요청안)
 WEIGHTS = {
     # --- 기술적 ---
-    "rsi30": 10,                # (1) RSI < 30 RSI(Relative Strength Index): 가격 상승/하락 압력의 상대적 강도를 0–100 범위로 나타내는 모멘텀 오실레이터.
-    "momentum_pos": 10,         # (2) MOM>0: 일정 기간 전 가격과 현재 가격의 차이를 통해 가격 상승/하락의 힘을 수치화한 것. Momentum > 0 → 현재 가격이 과거보다 높음 → 상승 압력
-    "macd_cross": 10,           # (3) MACD 골든크로스: MACD (Moving Average Convergence Divergence)MACD선이 Signal선을 아래에서 위로 돌파하는 순간 단기 추세가 장기 추세보다 강해지기 시작했다는 의미
+    "rsi30": 10,                # (1) RSI < 30
+    "momentum_pos": 10,         # (2) MOM>0
+    "macd_cross": 10,           # (3) MACD 골든크로스
     "ema5_over_ema20": 5,       # (4) 5일선이 20일선 돌파
     "ema20_over_ema60": 10,     # (5) 20일선이 60일선 돌파
     "rs_plus": 10,              # (6) 20일 상대강도(종목-KOSPI) +
@@ -48,10 +46,10 @@ WEIGHTS = {
 
     # --- 수급 ---
     "frg_own_1m_up": 10,        # (9) 외국인 지분율 1개월 증가
-    "frg_3_pos": 5,             # (10) 외국인 3일 연속 순매수 증가(평균 대비 +)
-    "frg_5_pos": 5,             # (11) 외국인 5일 연속 순매수 증가
-    "ins_3_pos": 5,             # (12) 기관 3일 연속 순매수 증가
-    "ins_5_pos": 5,             # (13) 기관 5일 연속 순매수 증가
+    "frg_3_pos": 5,             # (10) 외국인 3일 연속 순매수
+    "frg_5_pos": 5,             # (11) 외국인 5일 연속 순매수
+    "ins_3_pos": 5,             # (12) 기관 3일 연속 순매수
+    "ins_5_pos": 5,             # (13) 기관 5일 연속 순매수
 }
 
 # 거래량 점수 합산 정책: 120%와 150%가 동시 충족 시
@@ -63,22 +61,14 @@ VOLUME_SCORE_MODE = "max"  # "max"=상한만 채택, "sum"=둘 다 더함
 def add_indicators(px: pd.DataFrame) -> pd.DataFrame:
     """
     OHLCV 데이터프레임(px)에 기술적 지표 추가:
-      - RSI(14), MOM10, EMA5/20/60, MACD(12,26,9), VOL_3MA, VOL_MA20
+      - RSI(7), MOM10/5, EMA5/20/60, MACD(12,26,9), VOL_3MA, VOL_MA20
     """
     out = px.copy()
-    # 컬럼 표준화
     rename_map = {c: c.capitalize() for c in out.columns}
     out = out.rename(columns=rename_map)
     for need in ["Open", "High", "Low", "Close", "Volume"]:
         if need not in out.columns:
             raise ValueError(f"'{need}' column missing in price DataFrame")
-
-    # # RSI(14)
-    # delta = out["Close"].diff()
-    # up = delta.clip(lower=0.0).rolling(14).mean()
-    # down = (-delta.clip(upper=0.0)).rolling(14).mean()
-    # rs = up / (down + 1e-12)
-    # out["RSI"] = 100 - (100 / (1 + rs))
 
     # RSI(7)
     delta = out["Close"].diff()
@@ -87,8 +77,7 @@ def add_indicators(px: pd.DataFrame) -> pd.DataFrame:
     rs = up / (down + 1e-12)
     out["RSI"] = 100 - (100 / (1 + rs))
 
-
-    # Momentum(10)
+    # Momentum(10/5)
     out["MOM10"] = out["Close"] - out["Close"].shift(10)
     out["MOM5"] = out["Close"] - out["Close"].shift(5)
 
@@ -115,41 +104,34 @@ def fetch_investor_netbuy_df(ticker: str, start_yyyymmdd: str, end_yyyymmdd: str
     투자자별 순매수(금액) – pykrx
     반환: index=datetime, columns=['FRG','INS']  (원 단위, +면 순매수)
     """
-    # 티커 zero-padding 보정 (예: '5930' -> '005930')
     if isinstance(ticker, str) and ticker.isdigit() and len(ticker) < 6:
         ticker = ticker.zfill(6)
 
-    # pykrx: 일자별 투자자 거래대금(순매수; 기본) DataFrame
     df = krx.get_market_trading_value_by_date(start_yyyymmdd, end_yyyymmdd, ticker)
     if df is None or df.empty:
         return pd.DataFrame(columns=["FRG", "INS"])
 
-    # 날짜 인덱스 정리
     if not isinstance(df.index, pd.DatetimeIndex):
         df.index = pd.to_datetime(df.index, errors="coerce")
     df = df.sort_index()
 
-    # 컬럼 가드 (버전/시장/종목에 따라 일부 열 부재 가능)
     col_map = {
-        "FRG": ["외국인", "외국인합계"],     # 상황에 따라 컬럼명이 다를 수 있음
-        "INS": ["기관합계", "기관"]          # 기관합계가 일반적
+        "FRG": ["외국인", "외국인합계"],
+        "INS": ["기관합계", "기관"]
     }
 
-    def pick_col(frame: pd.DataFrame, candidates: list[str]) -> pd.Series:
+    def pick_col(frame: pd.DataFrame, candidates: List[str]) -> pd.Series:
         for c in candidates:
             if c in frame.columns:
                 s = pd.to_numeric(frame[c], errors="coerce")
                 s.name = None
                 return s
-        # 없으면 빈 시리즈 반환
         return pd.Series(index=frame.index, dtype=float)
 
     s_frg = pick_col(df, col_map["FRG"])
     s_ins = pick_col(df, col_map["INS"])
-
     out = pd.concat([s_frg.rename("FRG"), s_ins.rename("INS")], axis=1)
 
-    # NaN 전부면 빈 DF 반환
     if out["FRG"].isna().all() and out["INS"].isna().all():
         return pd.DataFrame(columns=["FRG", "INS"])
 
@@ -194,28 +176,28 @@ class ScoreBreakdown:
 
     def total(self) -> int:
         vol_part = max(self.vol_120, self.vol_150) if VOLUME_SCORE_MODE == "max" else (self.vol_120 + self.vol_150)
-        # 원 점수 합에서 거래량 부분을 교체
         base_sum = (self.rsi30 + self.momentum_pos + self.macd_cross +
                     self.ema5_over_ema20 + self.ema20_over_ema60 + self.rs_plus +
                     self.frg_own_1m_up + self.frg_3_pos + self.frg_5_pos +
                     self.ins_3_pos + self.ins_5_pos)
-        return base_sum + (vol_part)  # vol_120/150는 이미 0으로 초기화되어 있음
+        return base_sum + (vol_part)
 
 
 def score_one(
     ticker: str,
-    px: pd.DataFrame,               # OHLCV + 인디케이터
-    inv: pd.DataFrame,              # 투자자 순매수 금액 ['FRG','INS']
-    kospi_close: pd.Series,         # KOSPI 종가
-    frg_now: float = np.nan,        # 외국인 지분율(오늘 근처)
-    frg_1m: float = np.nan          # 외국인 지분율(1개월 전)
+    px: pd.DataFrame,               # OHLCV + 인디케이터 (index=Datetime)
+    inv: pd.DataFrame,              # 투자자 순매수 금액 ['FRG','INS'] (index=Datetime)
+    kospi_close: pd.Series,         # KOSPI 종가 (index=Datetime)
+    frg_now: float = np.nan,        # 외국인 지분율(해당일)
+    frg_1m: float = np.nan          # 외국인 지분율(해당일의 1개월 전 근사)
 ) -> Tuple[int, ScoreBreakdown]:
     """
-    요청하신 13개 조건으로 점수 산정
+    요청하신 13개 조건으로 점수 산정 (해당일 기준)
     """
     bd = ScoreBreakdown()
-    if len(px) < 65:
+    if px is None or px.empty or len(px) < 65:
         return 0, bd
+
     last = px.index.max()
 
     # (1) RSI < 30
@@ -225,15 +207,14 @@ def score_one(
     except Exception:
         pass
 
-    # (2) Momentum > 0 (10일)
+    # (2) Momentum > 0 (5일)
     try:
-        #if px.loc[last, "MOM10"] > 0:
         if px.loc[last, "MOM5"] > 0:
             bd.momentum_pos = WEIGHTS["momentum_pos"]
     except Exception:
         pass
 
-    # (3) MACD 골든크로스 (MACD > Signal & 직전 <=)
+    # (3) MACD 골든크로스
     try:
         macd, sig = px["MACD"], px["MACD_SIG"]
         if (macd.iloc[-1] > sig.iloc[-1]) and (macd.iloc[-2] <= sig.iloc[-2]):
@@ -289,35 +270,107 @@ def score_one(
     except Exception:
         pass
 
-    # (10) 외국인 3일 연속 순매수 증가 (+)
+    # (10)(11) 외국인 연속 순매수
     try:
-        if len(inv) >= 3 and (inv["FRG"].iloc[-3:] > 0).all():
-            bd.frg_3_pos = WEIGHTS["frg_3_pos"]
+        if inv is not None and not inv.empty:
+            inv = inv.sort_index()
+            if len(inv) >= 3 and (inv["FRG"].iloc[-3:] > 0).all():
+                bd.frg_3_pos = WEIGHTS["frg_3_pos"]
+            if len(inv) >= 5 and (inv["FRG"].iloc[-5:] > 0).all():
+                bd.frg_5_pos = WEIGHTS["frg_5_pos"]
     except Exception:
         pass
 
-    # (11) 외국인 5일 연속 순매수 증가
+    # (12)(13) 기관 연속 순매수
     try:
-        if len(inv) >= 5 and (inv["FRG"].iloc[-5:] > 0).all():
-            bd.frg_5_pos = WEIGHTS["frg_5_pos"]
-    except Exception:
-        pass
-
-    # (12) 기관 3일 연속 순매수 증가
-    try:
-        if len(inv) >= 3 and (inv["INS"].iloc[-3:] > 0).all():
-            bd.ins_3_pos = WEIGHTS["ins_3_pos"]
-    except Exception:
-        pass
-
-    # (13) 기관 5일 연속 순매수 증가
-    try:
-        if len(inv) >= 5 and (inv["INS"].iloc[-5:] > 0).all():
-            bd.ins_5_pos = WEIGHTS["ins_5_pos"]
+        if inv is not None and not inv.empty:
+            if len(inv) >= 3 and (inv["INS"].iloc[-3:] > 0).all():
+                bd.ins_3_pos = WEIGHTS["ins_3_pos"]
+            if len(inv) >= 5 and (inv["INS"].iloc[-5:] > 0).all():
+                bd.ins_5_pos = WEIGHTS["ins_5_pos"]
     except Exception:
         pass
 
     return bd.total(), bd
+
+
+# ========= 주간(최근 5영업일) 합산 유틸 =========
+def pick_foreign_own_for_date(fr_df: pd.DataFrame, the_date: pd.Timestamp):
+    """
+    fr_df: get_exhaustion_rates_of_foreign_investment_by_date 결과
+           index=datetime, '한도소진율' 컬럼 가정
+    the_date 기준의 최신값(frg_now)과 1개월 전 근사(frg_1m; 22BD 전)를 반환
+    """
+    if fr_df is None or fr_df.empty or "한도소진율" not in fr_df.columns:
+        return np.nan, np.nan
+
+    fr_df = fr_df.sort_index()
+    # the_date 이전(포함) 관측치 중 최신
+    frg_now = fr_df.loc[:the_date, "한도소진율"].tail(1)
+    frg_now = float(frg_now.iloc[0]) if len(frg_now) else np.nan
+
+    d_1m = the_date - BDay(22)
+    frg_1m = fr_df.loc[:d_1m, "한도소진율"].tail(1)
+    frg_1m = float(frg_1m.iloc[0]) if len(frg_1m) else np.nan
+    return frg_now, frg_1m
+
+
+def compute_weekly_score(
+    ticker: str,
+    px: pd.DataFrame,
+    inv: pd.DataFrame,
+    kospi_close: pd.Series,
+    fr_df: pd.DataFrame,
+) -> Tuple[float, Dict, List[Dict]]:
+    """
+    최근 5영업일 각각에 대해 score_one(...)을 호출 → 합산
+    반환:
+      - week_sum: 주간 총점(float)
+      - last_bd_dict: 가장 최근 일자의 ScoreBreakdown dict
+      - daily_breakdown: [{date, score, **breakdown}, ...] 최근 5영업일 리스트
+    """
+    if px is None or px.empty:
+        return 0.0, {}, []
+
+    px = px.sort_index()
+    last_dates = list(px.index[-WEEK_BDAYS:])  # 최근 5BD
+
+    week_sum = 0.0
+    last_bd_dict: Dict = {}
+    daily_breakdown: List[Dict] = []
+
+    for d in last_dates:
+        # 일자 d 까지로 슬라이스
+        px_d = px.loc[:d]
+        inv_d = None
+        if inv is not None and not inv.empty:
+            inv_d = inv.copy()
+            if not isinstance(inv_d.index, pd.DatetimeIndex):
+                inv_d.index = pd.to_datetime(inv_d.index, errors="coerce")
+            inv_d = inv_d.sort_index().loc[:d]
+
+        kospi_d = kospi_close.loc[:d]
+
+        frg_now_d, frg_1m_d = pick_foreign_own_for_date(fr_df, d)
+
+        total_d, bd_d = score_one(
+            ticker=ticker,
+            px=px_d,
+            inv=inv_d,
+            kospi_close=kospi_d,
+            frg_now=frg_now_d,
+            frg_1m=frg_1m_d
+        )
+
+        week_sum += float(total_d)
+
+        bd_dict = getattr(bd_d, "__dict__", {})
+        daily_breakdown.append({"date": d, "score": float(total_d), **bd_dict})
+
+        if d == last_dates[-1]:
+            last_bd_dict = bd_dict
+
+    return week_sum, last_bd_dict, daily_breakdown
 
 
 # ===================== 메인 파이프라인 =====================
@@ -333,51 +386,38 @@ def main():
 
     print(f"[기간] {s_fdr} ~ {e_fdr}")
 
-    # # 1) KOSPI 시총 상위 100 종목
-    # kospi = fdr.StockListing("KOSPI")
-    # kospi = kospi.dropna(subset=["Marcap"]).sort_values("Marcap", ascending=False)
-    # uni = kospi.head(TOP_N_MARCAP).copy()
-    # print(f"[유니버스] {len(uni)} 종목")
-
     # 2) KOSPI 지수 (상대강도용)
     idx_df = fdr.DataReader(INDEX_TICKER, s_fdr, e_fdr)
     if "Close" not in idx_df.columns:
         idx_df.rename(columns={c: c.capitalize() for c in idx_df.columns}, inplace=True)
     kospi_close = idx_df["Close"]
+    kospi_close.index = pd.to_datetime(kospi_close.index)
 
-    # 3) 외국인 지분율 맵 (오늘 vs 1개월 전)
+    # (선택) 외국인 지분율 맵 - 본 로직은 fr_df로 일자별 추출하므로 사용 안 함
     fr_now_df = foreign_ownership_ratio(e_krx, market="KOSPI")
     fr_1m_df  = foreign_ownership_ratio(d1m,  market="KOSPI")
-    fr_now_map = dict(zip(fr_now_df["티커"], fr_now_df["지분율"]))
-    fr_1m_map  = dict(zip(fr_1m_df["티커"],  fr_1m_df["지분율"]))
+    fr_now_map = dict(zip(fr_now_df.get("티커", []), fr_now_df.get("지분율", [])))
+    fr_1m_map  = dict(zip(fr_1m_df.get("티커", []),  fr_1m_df.get("지분율", [])))
 
     # KOSPI200 구성종목 티커(6자리) 리스트
     tickers = krx.get_index_portfolio_deposit_file("1028")
 
     # 종목명 붙이기
     uni = pd.DataFrame({"Code": tickers})
-    df = pd.DataFrame({"Code": tickers})
-    uni = uni[uni["Code"].isin(tickers)].copy()
-    uni["Marcap"] = np.nan
-    uni["Name"] = np.nan
-    
-    uni["Name"] = df["Code"].apply(krx.get_market_ticker_name)
-    
+    uni["Name"] = uni["Code"].apply(krx.get_market_ticker_name)
+
     rows: List[Dict] = []
 
-    for _, r in tqdm(uni.iterrows()):
-        ticker = r["Code"]          # 예: '005930' 형태
+    for _, r in tqdm(uni.iterrows(), total=len(uni)):
+        ticker = r["Code"]          # 예: '005930'
         name   = r.get("Name", "")
 
         try:
             # 4) 가격/거래량 (KRX OHLCV) + 인디케이터
-            #  - get_market_ohlcv_by_date는 인덱스가 날짜
             px = krx.get_market_ohlcv_by_date(s_krx, e_krx, ticker)
             if px is None or px.empty:
                 continue
 
-            # 컬럼 표준화: 기존 코드가 'Close' 등 영문을 기대했다면 매핑
-            # (pykrx 기본: 시가/고가/저가/종가/거래량/등락률)
             px = px.rename(columns={
                 "시가": "Open",
                 "고가": "High",
@@ -385,45 +425,33 @@ def main():
                 "종가": "Close",
                 "거래량": "Volume"
             })[["Open","High","Low","Close","Volume"]]
-
             px.index = pd.to_datetime(px.index)
-            px = add_indicators(px)  # 기존 함수 재사용
+            px = add_indicators(px)
 
-            # 5) 투자자 수급 (이미 KRX 기반이면 그대로, 아니면 pykrx 예시 참고)
-
-            # inv = stock.get_market_trading_value_by_date(s_krx, e_krx, ticker, detail=True)
+            # 5) 투자자 수급
             inv = fetch_investor_netbuy_df(ticker, s_krx, e_krx)
 
-            # 6) 외국인 지분율 (오늘 vs 1M 전) - KRX 소진율 API 활용 예시
-            #    소진율 데이터: get_exhaustion_rates_of_foreign_investment_by_date
+            # 6) 외국인 지분율(일자별) - 소진율 시계열
             fr_df = krx.get_exhaustion_rates_of_foreign_investment_by_date(s_krx, e_krx, ticker)
-            # 컬럼 예: 보유량, 한도수량, 한도소진율(%)
-            if fr_df is None or fr_df.empty:
-                frg_now = np.nan
-                frg_1m  = np.nan
-            else:
+            if fr_df is not None and not fr_df.empty:
                 fr_df.index = pd.to_datetime(fr_df.index)
                 fr_df = fr_df.sort_index()
-                # 오늘(가장 최근) 값
-                frg_now = float(fr_df["한도소진율"].iloc[-1]) if "한도소진율" in fr_df.columns else np.nan
-                # 1M 전 근사(거래일 기준 22영업일 전)
-                if len(fr_df) > 22:
-                    frg_1m = float(fr_df["한도소진율"].iloc[-23]) if "한도소진율" in fr_df.columns else np.nan
-                else:
-                    frg_1m = np.nan
 
-            # 7) 점수 산정
-            total, bd = score_one(
-                ticker=ticker, px=px, inv=inv, kospi_close=kospi_close,
-                frg_now=frg_now, frg_1m=frg_1m
+            # 7) 최근 5영업일 점수 합산
+            week_sum, last_bd_dict, daily_breakdown = compute_weekly_score(
+                ticker=ticker,
+                px=px,
+                inv=inv,
+                kospi_close=kospi_close,
+                fr_df=fr_df if (fr_df is not None and not fr_df.empty) else pd.DataFrame()
             )
 
             rows.append({
                 "Name": name,
                 "Code": ticker,
-                #"Marcap": r["Marcap"],
-                "Score": total,
-                **bd.__dict__
+                "Score_1w": week_sum,     # ★ 주간 총점
+                **last_bd_dict            # 마지막 일자 브레이크다운(원하면 보존)
+                # 필요 시 daily_breakdown를 별도 파일로 저장 가능
             })
 
         except Exception:
@@ -432,26 +460,26 @@ def main():
 
     if not rows:
         print("※ 결과 없음: 네트워크/거래일/pykrx 반환 형식 등을 확인하세요.")
-    else:
-        out = pd.DataFrame(rows).sort_values(by = ["Score"], ascending=[False])
+        return
+
+    out = pd.DataFrame(rows).sort_values(["Score_1w"], ascending=[False])
 
     # 출력
-    print("\n=== 총점 상위 종목 ===")
-    print(out.head(PICK_TOP)[["Name", "Code", "Score"]])
+    print("\n=== 직전 1주(5영업일) 총점 상위 종목 ===")
+    print(out.head(PICK_TOP)[["Name", "Code", "Score_1w"]])
 
-    print("\n=== 점수 브레이크다운 (상위 ) ===")
-    cols = ["Name","Code","Score"] + list(WEIGHTS.keys())
+    print("\n=== (참고) 마지막 일자 점수 브레이크다운(상위) ===")
+    cols = ["Name","Code","Score_1w"] + list(WEIGHTS.keys())
+    cols = [c for c in cols if c in out.columns]
     print(out.head(PICK_TOP)[cols])
 
-    # 저장 (선택)
+    # 저장
     get_dir = Path("./_sel_out")
     get_dir.mkdir(exist_ok=True, parents=True)
     filepath = os.path.join(get_dir, f"scored_{e_krx}.csv")
-    out.to_csv(filepath, index=True)
+    out.to_csv(filepath, index=False, encoding="utf-8-sig")
     print(f"[저장] {filepath}")
 
 
 if __name__ == "__main__":
     main()
-
-
