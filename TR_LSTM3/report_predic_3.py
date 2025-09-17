@@ -264,8 +264,8 @@ def report_predictions(model, test_loader, device, cfg):
     table.insert(2, "code", cfg.code)
 
     # --- 저장 ---
-    out_dir = Path(cfg.predput_dir) / f"{cfg.end_date}"; out_dir.mkdir(parents=True, exist_ok=True)
-    out_csv = out_dir / f"pred_result_{cfg.code}.csv"
+    out_dir = Path(cfg.predict_dir) / f"{cfg.end_date}"; out_dir.mkdir(parents=True, exist_ok=True)
+    out_csv = out_dir / f"pred_{cfg.name}_{cfg.code}.csv"
     ordered_cols = (
         ["date", "name", "code"]
         + [f"true_{ch}" for ch in CHANNELS]
@@ -274,40 +274,43 @@ def report_predictions(model, test_loader, device, cfg):
     table[ordered_cols].to_csv(out_csv, index=False)
     print(f"[saved] {out_csv}")
 
-    # --- 플롯: horizon별 × 채널별 ---
+    # --- (옵션) h=1 롤링 경로 ---
     dfp = table.copy()
     dfp["date"] = pd.to_datetime(dfp["date"], errors="coerce")
     x = dfp["date"].to_numpy()
+    
+    if cfg.PREDIC_PLOT and (1 in horizons):
+        # --- 플롯: horizon별 × 채널별 ---
+        for h in horizons:
+            for ch in CHANNELS:
+                pred_col = f"pred_h{h}_{ch}"
+                true_col = f"true_{ch}"
+                if pred_col not in dfp.columns:
+                    continue
 
-    for h in horizons:
-        for ch in CHANNELS:
-            pred_col = f"pred_h{h}_{ch}"
-            true_col = f"true_{ch}"
-            if pred_col not in dfp.columns:
-                continue
+                y_true = dfp[true_col].astype(float).to_numpy()
+                y_pred = dfp[pred_col].astype(float).to_numpy()
 
-            y_true = dfp[true_col].astype(float).to_numpy()
-            y_pred = dfp[pred_col].astype(float).to_numpy()
+                m = np.isfinite(y_true) | np.isfinite(y_pred)
+                if not m.any():
+                    continue
 
-            m = np.isfinite(y_true) | np.isfinite(y_pred)
-            if not m.any():
-                continue
+                fig, ax = plt.subplots(figsize=(14,5))
+                ax.plot(x[m], y_true[m], label=f"True {ch}", marker='o', linestyle='--', linewidth=2, alpha=0.9)
+                ax.plot(x[m], y_pred[m], label=f"Pred +{h}d {ch}", marker='o', linestyle='-',  alpha=0.9)
 
-            fig, ax = plt.subplots(figsize=(14,5))
-            ax.plot(x[m], y_true[m], label=f"True {ch}", marker='o', linestyle='--', linewidth=2, alpha=0.9)
-            ax.plot(x[m], y_pred[m], label=f"Pred +{h}d {ch}", marker='o', linestyle='-',  alpha=0.9)
+                loc = mdates.AutoDateLocator()
+                ax.xaxis.set_major_locator(loc)
+                ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(loc))
 
-            loc = mdates.AutoDateLocator()
-            ax.xaxis.set_major_locator(loc)
-            ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(loc))
-
-            ax.set_title(f"{cfg.name}({cfg.code}) — {ch.upper()} | Target +{h}d")
-            ax.set_xlabel("Date"); ax.set_ylabel("Price")
-            ax.grid(True); ax.legend()
-            plt.tight_layout()
+                ax.set_title(f"{cfg.name}({cfg.code}) — {ch.upper()} | Target +{h}d")
+                ax.set_xlabel("Date"); ax.set_ylabel("Price")
+                ax.grid(True); ax.legend()
+                plt.tight_layout()
+                plt.show()
 
     # --- (옵션) h=1 롤링 경로 ---
-    if ROLLING_H1_PLOT and (1 in horizons):
+    if cfg.PREDIC_ROLLING_H1_PLOT and (1 in horizons):
         # h=1 정렬 결과가 이미 절대가이므로 그 값을 날짜축에 그대로 붙여 시각화
         roll = pd.DataFrame({"date": dfp["date"]})
         for ch in CHANNELS:
@@ -328,5 +331,6 @@ def report_predictions(model, test_loader, device, cfg):
             ax.set_xlabel("Date"); ax.set_ylabel("Price")
             ax.grid(True); ax.legend()
             plt.tight_layout()
+            plt.show()
 
-    plt.show()
+    

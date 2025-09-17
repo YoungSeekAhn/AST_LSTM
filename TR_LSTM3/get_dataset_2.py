@@ -12,7 +12,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from pykrx import stock
-#from get_global_krx import get_global_stock_indices
+from get_global import get_global_stock_indices
 
 from DSConfig_3 import FeatureConfig
 
@@ -235,7 +235,7 @@ def merge_sources(date: pd.DataFrame, ohlcv: pd.DataFrame, investor: pd.DataFram
     return out
 
 
-def get_dataset(cfg, SAVE_CSV_FILE=True, PLOT_ROLLING=True) -> pd.DataFrame:
+def get_dataset(cfg, SAVE_CSV_FILE=True) -> pd.DataFrame:
     """
     Fetches and merges stock data from KRX, including OHLCV, investor trading values, and fundamentals.
     
@@ -287,12 +287,12 @@ def get_dataset(cfg, SAVE_CSV_FILE=True, PLOT_ROLLING=True) -> pd.DataFrame:
     # 8) (선택) rolling h=1 경로
     if SAVE_CSV_FILE:
         print(merged_df.head())
-        get_dir = Path(cfg.getdata_dir)
+        get_dir = Path(cfg.getdata_dir) / f"{cfg.end_date}"
         get_dir.mkdir(exist_ok=True, parents=True)
         filepath = os.path.join(get_dir, f"{cfg.name}({cfg.code})_{cfg.end_date}.csv")
         merged_df.to_csv(filepath, index=True)
 
-    if PLOT_ROLLING:
+    if cfg.GETDATA_PLOT_ROLLING:
         # Plot rolling averages and other features
         if merged_df.empty:
             raise ValueError("Merged DataFrame is empty. Please check the data sources.")

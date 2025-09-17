@@ -205,7 +205,7 @@ def make_windows_block(
 def make_datasets(df: pd.DataFrame, cfg: DSConfig, LOAD_CSV_FILE=True):
     # 1) 원천 로드(선택)
     if LOAD_CSV_FILE:
-        get_dir = Path(cfg.getdata_dir)
+        get_dir = Path(cfg.getdata_dir) / f"{cfg.end_date}"
         filepath = os.path.join(get_dir, f"{cfg.name}({cfg.code})_{cfg.end_date}.csv")
         df = pd.read_csv(filepath, index_col=0, parse_dates=True)
         print(f"Loaded data from: {filepath}")
@@ -280,7 +280,7 @@ def make_datasets(df: pd.DataFrame, cfg: DSConfig, LOAD_CSV_FILE=True):
     }
 
     # 9) 저장
-    out_dir = Path(cfg.dataset_dir); out_dir.mkdir(exist_ok=True, parents=True)
+    out_dir = Path(cfg.dataset_dir) / f"{cfg.end_date}"; out_dir.mkdir(exist_ok=True, parents=True)
     dataset_path = os.path.join(out_dir, f"{cfg.name}({cfg.code})_{cfg.end_date}.pkl")
     with open(dataset_path, "wb") as f:
         pickle.dump(payload, f)

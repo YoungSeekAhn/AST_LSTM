@@ -41,17 +41,17 @@ config.start_date = Start_Date  # 자동 결정 (예: "20220101")
 config.end_date = End_Date    # 자동 결정 (예: "20231231")
 
 get_dir = Path(config.getdata_dir)
-#csvpath = os.path.join(get_dir, f"{config.name}({config.code})_{config.end_date}.csv")
+csvpath = os.path.join(get_dir, f"{config.name}({config.code})_{config.end_date}.csv")
 
-csvpath = os.path.join(get_dir, "삼성전자(005930)_20250909.csv")
-merged_df = pd.read_csv(csvpath, index_col=0, parse_dates=True)
+#csvpath = os.path.join(get_dir, "삼성전자(005930)_20250909.csv")
+#merged_df = pd.read_csv(csvpath, index_col=0, parse_dates=True)
 
-# if not os.path.exists(csvpath):   # 파일이 없으면
-#     merged_df = get_dataset(config, SAVE_CSV_FILE=True)
-#     print("CSV 수집 데이터 파일을 생성합니다.:", csvpath)
+if not os.path.exists(csvpath):   # 파일이 없으면
+    merged_df = get_dataset(config, SAVE_CSV_FILE=True)
+    print("CSV 수집 데이터 파일을 생성합니다.:", csvpath)
 
-# else:
-#     print("CSV 수집 데이터 파일이 이미 존재 합니다:", csvpath)
+else:
+    print("CSV 수집 데이터 파일이 이미 존재 합니다:", csvpath)
 
 dataset_dir = Path(config.dataset_dir)
 datapath = os.path.join(dataset_dir, f"{config.name}({config.code})_{config.end_date}.pkl")

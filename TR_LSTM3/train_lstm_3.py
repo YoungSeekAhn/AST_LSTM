@@ -199,7 +199,7 @@ def train(model, cfg, device, criterion, train_loader, val_loader, num_epochs):
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", patience=4, factor=0.5)
 
     best = float("inf"); bad = 0
-    model_dir = Path(cfg.model_dir)
+    model_dir = Path(cfg.model_dir) /f"{cfg.end_date}"
     model_dir.mkdir(parents=True, exist_ok=True)
     best_path = os.path.join(model_dir, f"{cfg.name}({cfg.code})_{cfg.end_date}.pt")
 
@@ -253,7 +253,7 @@ def train(model, cfg, device, criterion, train_loader, val_loader, num_epochs):
 # ---------------- Top-level ----------------
 def training_LSTM(payload, cfg, LOAD_DATASET_FILE = True, TRAIN_PLOT = True):
     if LOAD_DATASET_FILE:
-        get_dir = Path(cfg.dataset_dir)
+        get_dir = Path(cfg.dataset_dir) / f"{cfg.end_date}"
         payload_path = os.path.join(get_dir, f"{cfg.name}({cfg.code})_{cfg.end_date}.pkl")
         payload = pd.read_pickle(payload_path)
 
@@ -306,7 +306,7 @@ def training_LSTM(payload, cfg, LOAD_DATASET_FILE = True, TRAIN_PLOT = True):
           f"| RMSE[h/l/c] {te_m['rmse_high']:.4f}/{te_m['rmse_low']:.4f}/{te_m['rmse_close']:.4f}")
 
     # (선택) 학습 곡선
-    if TRAIN_PLOT:
+    if cfg.TRAIN_PLOT:
         fig, axes = plt.subplots(1,2, figsize=(12,5))
         axes[0].plot(history["train_loss"], label="Train")
         axes[0].plot(history["val_loss"], label="Val")

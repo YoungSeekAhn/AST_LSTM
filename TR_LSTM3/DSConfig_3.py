@@ -1,44 +1,7 @@
 # DSConfig.py
 from dataclasses import dataclass, field
 from typing import List, Optional
-from datetime import datetime, timedelta
-from pykrx import stock
 
-
-# Stock_Name = "LG전자"  # 종목 이름
-
-# # 전체 종목 리스트 (코드와 이름)
-# tickers = stock.get_market_ticker_list(market="ALL")  # KOSPI, KOSDAQ 모두
-# mapping = {stock.get_market_ticker_name(t): t for t in tickers}
-
-# Stock_Code = mapping[Stock_Name]
-
-# if not Stock_Code:
-#     raise ValueError(f"종목 이름 '{Stock_Name}'에 해당하는 종목 코드가 없습니다. 종목 이름을 확인하세요.")
-
-# def is_trading_day(yyyymmdd: str, ticker: str = "005930") -> bool:
-#     """해당 날짜가 거래일인지 여부 반환 (티커 일봉 데이터 존재 여부로 판단)."""
-#     df = stock.get_market_ohlcv_by_date(yyyymmdd, yyyymmdd, ticker)
-#     return df is not None and len(df) > 0
-
-# def last_trading_day(ref: datetime | None = None) -> str:
-#     """
-#     기준일(ref) 포함하여, 가장 최근 거래일 'YYYYMMDD' 반환.
-#     ref가 None이면 오늘 기준.
-#     """
-#     if ref is None:
-#         ref = datetime.today()
-#     d = ref
-#     while True:
-#         ymd = d.strftime("%Y%m%d")
-#         if is_trading_day(ymd):
-#             return ymd
-#         d -= timedelta(days=1)
-
-# # 시작일과 종료일 자동 설정   
-# Duration = 365 * 2  # 데이터 기간 (일수)     
-# End_Date = last_trading_day()
-# Start_Date = (datetime.strptime(End_Date, "%Y%m%d") - timedelta(days=Duration)).strftime("%Y%m%d")
 
 @dataclass
 class SplitConfig:
@@ -65,15 +28,25 @@ class DSConfig:
     #split: SplitConfig = field(default_factory=SplitConfig)
     batch_size: int = 32  # 배치 크기
     # 저장 경로
-    dataset_dir: str = "./TR_LSTM3/_datasets"  # 데이터셋 저장 디렉토리
-    getdata_dir: str = "./TR_LSTM3/_csvdata"  
-    scaler_dir: str = "./TR_LSTM3/_scalers"  # 스케일러 저장 디렉토리
-    model_dir: str = "./TR_LSTM3/_models"  # 모델 저장 디렉토리
-    predput_dir: str = "./TR_LSTM3/_predic_out"  # 출력 결과 저장 디렉토리
     selout_dir: str = "./TR_LSTM3/_selec_out"  # 선택된 출력 결과 저장 디렉토리
+    getdata_dir: str = "./TR_LSTM3/_getdata" # CSV 수집 데이터 저장 디렉토리
+    
+    dataset_dir: str = "./TR_LSTM3/_train/_datasets"  # 데이터셋 저장 디렉토리
+    model_dir: str = "./TR_LSTM3/_train/_models"  # 모델 저장 디렉토리
+    scaler_dir: str = "./TR_LSTM3/_train/_scalers"  # 스케일러 저장 디렉토리
+         
+    predict_dir: str = "./TR_LSTM3/_predict_out"  # 출력 결과 저장 디렉토리
+    report_dir: str = "./TR_LSTM3/_report_out"  # 분석 결과 저장 디렉토리
 
-    test_getdata_dir: str = "./TR_LSTM3/_csvdata/삼성전자(005930)_20250909.csv"
 
+    #test_getdata_dir: str = "./TR_LSTM3/_csvdata/삼성전자(005930)_20250909.csv"
+
+    ## Display Option
+    GETDATA_PLOT_ROLLING: bool = True  # get_dataset()에서 롤링 차트 그릴지 여부
+    TRAIN_PLOT: bool = False  # training_LSTM()에서 학습 곡선 그릴지 여부
+    PREDIC_PLOT: bool = False  # report_predic_3.py에서 롤링 차트 그릴지 여부
+    PREDIC_ROLLING_H1_PLOT: bool = False  # report_predic_3.py에서 h=1 롤링 차트 그릴지 여부
+    
 config = DSConfig()
 
 @dataclass

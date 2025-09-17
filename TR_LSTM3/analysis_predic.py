@@ -147,9 +147,9 @@ def evaluate_symbol_to_wide(df: pd.DataFrame, stock_name: str, stock_code: str):
 # ---------------------------
 # 폴더 단위 일괄 처리
 # ---------------------------
-def evaluate_directory_to_one_row_per_symbol():
+def evaluate_predict_result():
     
-    input_dir = Path(cfg.predput_dir) / f"{cfg.end_date}"
+    input_dir = Path(cfg.predict_dir) / f"{cfg.end_date}"
     paths = sorted(glob.glob(os.path.join(input_dir, "*.csv")))
     if not paths:
         raise FileNotFoundError(f"No files in {input_dir}/*.csv")
@@ -177,8 +177,8 @@ def evaluate_directory_to_one_row_per_symbol():
     other_cols = [c for c in out.columns if c not in cols_front]
     out = out[cols_front + other_cols]
 
-    output_dir = Path(cfg.predput_dir)
-    output_csv = output_dir / f"Anal_result_{cfg.end_date}"
+    output_dir = Path(cfg.report_dir); output_dir.mkdir(exist_ok=True, parents=True)
+    output_csv = output_dir /f"Report_{cfg.end_date}" / f"Predict_result_{cfg.end_date}.csv"
     out.to_csv(output_csv, index=False, encoding="utf-8-sig")
     
     return out
@@ -189,6 +189,6 @@ def evaluate_directory_to_one_row_per_symbol():
 if __name__ == "__main__":
     # 예: ./pred_results 폴더에 종목별 CSV가 있을 때
     # 결과: symbol_metrics_wide.csv (종목당 1행)
-    out = evaluate_directory_to_one_row_per_symbol()
+    out = evaluate_predict_result()
     print(out.head())
     pass
