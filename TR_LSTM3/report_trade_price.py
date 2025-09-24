@@ -19,6 +19,7 @@ import numpy as np
 from pathlib import Path
 from DSConfig_3 import DSConfig, config
 from dataset_functions import last_trading_day
+from make_trade_price import make_trade_price
 
 cfg = DSConfig
 cfg.end_date = last_trading_day()
@@ -148,7 +149,9 @@ def build_html(df: pd.DataFrame) -> str:
 </html>"""
     return html
 
-def main():
+def report_trade_price(cfg):
+    
+    make_trade_price(cfg)
     
     input_dir = Path(cfg.report_dir) / f"Report_{cfg.end_date}"
     input_file = input_dir / f"Trading_price_{cfg.end_date}.csv"
@@ -170,5 +173,9 @@ def main():
         f.write(html)
     print(f"[OK] HTML saved -> {output_file}")
 
+def main():
+    print("→ report_trade_price.py 시작")
+    report_trade_price()  
+    
 if __name__ == "__main__":
     main()

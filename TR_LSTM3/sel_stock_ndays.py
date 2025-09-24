@@ -378,7 +378,7 @@ def compute_weekly_score(
 
 
 # ===================== 메인 파이프라인 =====================
-def main():
+def sel_stock(cfg):
     # 날짜 설정
     today = dt.date.today()
     start = today - dt.timedelta(days=LOOKBACK_DAYS)
@@ -486,4 +486,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sel_stock()

@@ -42,7 +42,7 @@ class DSConfig:
     #test_getdata_dir: str = "./TR_LSTM3/_csvdata/삼성전자(005930)_20250909.csv"
 
     ## Display Option
-    GETDATA_PLOT_ROLLING: bool = True  # get_dataset()에서 롤링 차트 그릴지 여부
+    GETDATA_PLOT_ROLLING: bool = False  # get_dataset()에서 롤링 차트 그릴지 여부
     TRAIN_PLOT: bool = False  # training_LSTM()에서 학습 곡선 그릴지 여부
     PREDIC_PLOT: bool = False  # report_predic_3.py에서 롤링 차트 그릴지 여부
     PREDIC_ROLLING_H1_PLOT: bool = False  # report_predic_3.py에서 h=1 롤링 차트 그릴지 여부

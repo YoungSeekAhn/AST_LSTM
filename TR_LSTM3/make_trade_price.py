@@ -183,67 +183,68 @@ def compute_levels(row, H_sel, last_close, pred=None):
         "buf_close": round(buf_close, 2), "buf_high": round(buf_high, 2), "buf_low": round(buf_low, 2)
     }
 
-# ------------------- 메인 파이프라인 -------------------
-file_path = Path(cfg.report_dir) / f"Report_{cfg.end_date}"
-file_path = file_path / f"Predict_result_{cfg.end_date}.csv"
+def make_trade_price(cfg):
+    # ------------------- 메인 파이프라인 -------------------
+    file_path = Path(cfg.report_dir) / f"Report_{cfg.end_date}"
+    file_path = file_path / f"Predict_result_{cfg.end_date}.csv"
 
-df = pd.read_csv(file_path, dtype={"종목코드": str})
-df["종목코드"] = df["종목코드"].str.zfill(6)
-for c in df.columns:
-    if c not in ["종목명", "종목코드"]:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
+    df = pd.read_csv(file_path, dtype={"종목코드": str})
+    df["종목코드"] = df["종목코드"].str.zfill(6)
+    for c in df.columns:
+        if c not in ["종목명", "종목코드"]:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
 
-reco_rows = []
-for _, row in df.iterrows():
-    best_h, explain = pick_recommended_horizon(row)
+    reco_rows = []
+    for _, row in df.iterrows():
+        best_h, explain = pick_recommended_horizon(row)
 
-    code = row["종목코드"]; name = row["종목명"]
-    lc = latest_close.get(code)
-    if lc is None:
-        # 데모 스케일: MAE*100 (실거래에서는 반드시 최신 종가로 대체)
-        approx = row.get(f"{best_h}_close_MAE", 1000.0)
-        lc = max(approx, 1000.0) * 100.0
+        code = row["종목코드"]; name = row["종목명"]
+        lc = latest_close.get(code)
+        if lc is None:
+            # 데모 스케일: MAE*100 (실거래에서는 반드시 최신 종가로 대체)
+            approx = row.get(f"{best_h}_close_MAE", 1000.0)
+            lc = max(approx, 1000.0) * 100.0
 
-    levels = compute_levels(row, best_h, lc, pred=None)
+        levels = compute_levels(row, best_h, lc, pred=None)
 
-    # 요약 행
-    reco_rows.append({
-        "종목명": name, "종목코드": code,
-        "권장호라이즌": best_h,
-        "요약점수(h1)": explain["h1"]["total"], "요약점수(h2)": explain["h2"]["total"], "요약점수(h3)": explain["h3"]["total"],
-        f"{best_h}_MAPE(%)": row[f"{best_h}_close_MAPE(%)"],
-        f"{best_h}_DirAcc(%)": row[f"{best_h}_close_DirAcc(%)"],
-        f"{best_h}_Bias": row[f"{best_h}_close_Bias"],
-        f"{best_h}_MAE": row[f"{best_h}_close_MAE"],
-        f"{best_h}_count": row[f"{best_h}_close_count"],
-        "last_close": round(lc, 2),
-        "매수가(entry)": levels["entry"],
-        "익절가(tp)": levels["tp"],
-        "손절가(sl)": levels["sl"],
-        "RR": levels["RR"]
-    })
+        # 요약 행
+        reco_rows.append({
+            "종목명": name, "종목코드": code,
+            "권장호라이즌": best_h,
+            "요약점수(h1)": explain["h1"]["total"], "요약점수(h2)": explain["h2"]["total"], "요약점수(h3)": explain["h3"]["total"],
+            f"{best_h}_MAPE(%)": row[f"{best_h}_close_MAPE(%)"],
+            f"{best_h}_DirAcc(%)": row[f"{best_h}_close_DirAcc(%)"],
+            f"{best_h}_Bias": row[f"{best_h}_close_Bias"],
+            f"{best_h}_MAE": row[f"{best_h}_close_MAE"],
+            f"{best_h}_count": row[f"{best_h}_close_count"],
+            "last_close": round(lc, 2),
+            "매수가(entry)": levels["entry"],
+            "익절가(tp)": levels["tp"],
+            "손절가(sl)": levels["sl"],
+            "RR": levels["RR"]
+        })
 
-result = pd.DataFrame(reco_rows)
-# 가독성 정렬: 권장호라이즌 점수가 낮을수록 상단
-result = result.sort_values(["권장호라이즌", "RR"], ascending=[True, False]).reset_index(drop=True)
+    result = pd.DataFrame(reco_rows)
+    # 가독성 정렬: 권장호라이즌 점수가 낮을수록 상단
+    result = result.sort_values(["권장호라이즌", "RR"], ascending=[True, False]).reset_index(drop=True)
 
-print("=== 권장 호라이즌 및 트레이드 레벨 ===")
-cols = ["종목명","종목코드","권장호라이즌",
-        "last_close","매수가(entry)","익절가(tp)","손절가(sl)","RR",
-        "요약점수(h1)","요약점수(h2)","요약점수(h3)",
-        "h1_Med","h2_Med","h3_Med"]
-# 출력 컬럼 보정 (호라이즌별 메트릭은 동적으로 존재하므로 안전 처리)
-print(
-    result[
-        [c for c in ["종목명","종목코드","권장호라이즌","last_close","매수가(entry)","익절가(tp)","손절가(sl)","RR",
-                     "요약점수(h1)","요약점수(h2)","요약점수(h3)",
-                     "h1_close_MAPE(%)","h2_close_MAPE(%)","h3_close_MAPE(%)",
-                     "h1_close_DirAcc(%)","h2_close_DirAcc(%)","h3_close_DirAcc(%)"] if c in result.columns]
-    ].to_string(index=False)
-)
+    print("=== 권장 호라이즌 및 트레이드 레벨 ===")
+    cols = ["종목명","종목코드","권장호라이즌",
+            "last_close","매수가(entry)","익절가(tp)","손절가(sl)","RR",
+            "요약점수(h1)","요약점수(h2)","요약점수(h3)",
+            "h1_Med","h2_Med","h3_Med"]
+    # 출력 컬럼 보정 (호라이즌별 메트릭은 동적으로 존재하므로 안전 처리)
+    print(
+        result[
+            [c for c in ["종목명","종목코드","권장호라이즌","last_close","매수가(entry)","익절가(tp)","손절가(sl)","RR",
+                        "요약점수(h1)","요약점수(h2)","요약점수(h3)",
+                        "h1_close_MAPE(%)","h2_close_MAPE(%)","h3_close_MAPE(%)",
+                        "h1_close_DirAcc(%)","h2_close_DirAcc(%)","h3_close_DirAcc(%)"] if c in result.columns]
+        ].to_string(index=False)
+    )
 
-# 저장(선택)
-out_path = Path(cfg.report_dir) / f"Report_{cfg.end_date}" / f"Trading_price_{cfg.end_date}.csv"
-result.to_csv(out_path, index=False, encoding="utf-8-sig")
-# result.to_csv("./recommended_horizon_and_levels.csv", index=False, encoding="utf-8-sig")
+    # 저장(선택)
+    out_path = Path(cfg.report_dir) / f"Report_{cfg.end_date}" / f"Trading_price_{cfg.end_date}.csv"
+    result.to_csv(out_path, index=False, encoding="utf-8-sig")
+    # result.to_csv("./recommended_horizon_and_levels.csv", index=False, encoding="utf-8-sig")
 

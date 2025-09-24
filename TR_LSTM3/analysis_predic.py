@@ -147,7 +147,7 @@ def evaluate_symbol_to_wide(df: pd.DataFrame, stock_name: str, stock_code: str):
 # ---------------------------
 # 폴더 단위 일괄 처리
 # ---------------------------
-def evaluate_predict_result():
+def evaluate_predict_result(cfg):
     
     input_dir = Path(cfg.predict_dir) / f"{cfg.end_date}"
     paths = sorted(glob.glob(os.path.join(input_dir, "*.csv")))
@@ -179,6 +179,7 @@ def evaluate_predict_result():
 
     output_dir = Path(cfg.report_dir); output_dir.mkdir(exist_ok=True, parents=True)
     output_csv = output_dir /f"Report_{cfg.end_date}" / f"Predict_result_{cfg.end_date}.csv"
+    output_csv.parent.mkdir(exist_ok=True, parents=True)
     out.to_csv(output_csv, index=False, encoding="utf-8-sig")
     
     return out

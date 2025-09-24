@@ -288,17 +288,21 @@ th {{ background: #f7f7f7; }}
 # ---------------------------
 # CLI
 # ---------------------------
-def main():
+def report_out(cfg):
 
-    evaluate_predict_result()
+    evaluate_predict_result(cfg)
     
     input_dir = Path(cfg.report_dir)
-    input_file = input_dir /f"{cfg.end_date}" / f"Predict_result_{cfg.end_date}.csv"
+    input_file = input_dir / f"Report_{cfg.end_date}" / f"Predict_result_{cfg.end_date}.csv"
 
     output_dir = Path(cfg.report_dir)
-    output_file = output_dir / f"{cfg.end_date}" / f"Report_{cfg.end_date}"
+    output_file = output_dir / f"Report_{cfg.end_date}"
 
     run_build(input_file, output_file)
 
+def main():
+    print("→ report_builder.py 시작")
+    report_out()
+    
 if __name__ == "__main__":
     main()

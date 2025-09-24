@@ -11,11 +11,15 @@ from typing import Optional
 
 from pykrx import stock
 
+from sel_stock_ndays import sel_stock
 from DSConfig_3 import config
 from dataset_functions import last_trading_day
 from get_dataset_2 import get_dataset
 from make_dataset_3 import make_datasets
 from train_lstm_3 import training_LSTM
+from analysis_predic import evaluate_predict_result
+from report_out import report_out
+from report_trade_price import report_trade_price
 
 # =========================
 # 사용자 설정
@@ -124,7 +128,8 @@ def main():
     SEL_CSV_PATH = os.path.join(sel_dir, f"scored_{end_date}.csv")
     
     if not os.path.exists(SEL_CSV_PATH):
-        raise FileNotFoundError(f"선정 CSV를 찾을 수 없습니다: {SEL_CSV_PATH}")
+        #raise FileNotFoundError(f"선정 CSV를 찾을 수 없습니다: {SEL_CSV_PATH}")
+        sel_stock(config)  # 선정 CSV 생성 시도
 
     sel = pd.read_csv(SEL_CSV_PATH, dtype={"Code": str})
     # 안전한 정렬 (Score_1w 내림차순)
@@ -164,6 +169,11 @@ def main():
         print(f"\n[{tag} {len(arr)}]")
         for (n, c, _, msg) in arr:
             print(f"- {n} ({c}) {('→ ' + msg) if msg else ''}")
+
+    #evaluate_predict_result(config)
+    report_out(config)
+    report_trade_price(config)
+    
 
 if __name__ == "__main__":
     main()
